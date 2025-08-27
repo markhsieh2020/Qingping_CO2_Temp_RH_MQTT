@@ -68,20 +68,20 @@ static const char* mqtt_user   = "mqtt_user";            // ← Replace with you
 static const char* mqtt_pass   = "mqtt_pass";            // ← Replace with your MQTT password
 
 static const char* discovery_prefix = "homeassistant";   // ← Usually keep "homeassistant" for HA MQTT discovery
-static const char* topic_prefix     = "ESP32_C3_BLE_11EC7C"; // ← Change to a unique topic prefix per device
-static const char* AVAIL_TOPIC      = "ESP32_C3_BLE_11EC7C/availability"; // ← Must match your topic_prefix
+static const char* topic_prefix     = "ESP32_C3_BLE_DDEEFF"; // ← Change to a unique topic prefix per device
+static const char* AVAIL_TOPIC      = "ESP32_C3_BLE_DDEEFF/availability"; // ← Must match your topic_prefix
 
 // Controls: Restart / LED
-static const char* CMD_RESTART_TOPIC = "ESP32_C3_BLE_11EC7C/cmd/restart"; // ← Command topic for restart control
-static const char* CMD_LED_TOPIC     = "ESP32_C3_BLE_11EC7C/cmd/led";     // ← Command topic for LED control
-static const char* STATE_LED_TOPIC   = "ESP32_C3_BLE_11EC7C/state/led";   // ← State topic for LED reporting
+static const char* CMD_RESTART_TOPIC = "ESP32_C3_BLE_DDEEFF/cmd/restart"; // ← Command topic for restart control
+static const char* CMD_LED_TOPIC     = "ESP32_C3_BLE_DDEEFF/cmd/led";     // ← Command topic for LED control
+static const char* STATE_LED_TOPIC   = "ESP32_C3_BLE_DDEEFF/state/led";   // ← State topic for LED reporting
 
-static const char* DEVICE_ID   = "ESP32_C3_BLE_11EC7C";  // ← Unique device ID (use part of MAC address to avoid conflicts)
-static const char* DEVICE_NAME = "ESP32-C3 CO2 11EC7C";  // ← Friendly name (shown in Home Assistant)
+static const char* DEVICE_ID   = "ESP32_C3_BLE_DDEEFF";  // ← Unique device ID (use part of MAC address to avoid conflicts)
+static const char* DEVICE_NAME = "ESP32-C3 CO2 DDEEFF";  // ← Friendly name (shown in Home Assistant)
 static const char* DEVICE_MODEL= "ESP32-C3-MINI";        // ← Hardware model
 static const char* DEVICE_MANUFACTURER = "Mark";         // ← Replace with your name/brand if sharing
-static const char* HW_VERSION  = "ESP32_C3_mini_BLE_MQTT (2025-08-26)"; // ← Optional: update with your HW version/date
-static const char* SW_VERSION  = "ESP32_C3_mini_BLE (2025-08-26)";      // ← Optional: update with your SW version/date, Firmware in Home Assistant
+static const char* HW_VERSION  = "ESP32_C3_mini_BLE_MQTT (2025-08-XX)"; // ← Optional: update with your HW version/date
+static const char* SW_VERSION  = "ESP32_C3_mini_BLE (2025-08-XX)";      // ← Optional: update with your SW version/date, Firmware in Home Assistant
 
 WiFiClient   net;
 PubSubClient client(net);
@@ -92,7 +92,7 @@ static const int LED_PIN = 8;     // Most C3 boards: LOW = ON, HIGH = OFF
 static bool ledState = false;
 
 /* ===================【 Target BLE Device 】=================== */
-static const char* TARGET_BLE_ADDR = "58:2d:34:84:54:0c"; // Lowercase, colon format
+static const char* TARGET_BLE_ADDR = "aa:bb:cc:dd:ee:ff"; // ← Replace with your BLE MAC, Lowercase, colon format
 
 
 struct QingpingCO2Parsed {

@@ -219,7 +219,8 @@ bool parseFDCD_TLV(const std::vector<uint8_t>& sd, QingpingCO2Parsed& o) {
 | Model                      | Firmware | Tested | Notes                          |
 |-----------------------------|----------|--------|--------------------------------|
 | Qingping CO₂ Temp RH CGP22C | 2.0.6    | ✅ Yes | BLE parsing verified in this repo |
-
+| Qingping CO₂ Temp RH CGP22C | 1.3.8    | ✅ Yes | Using sample data from GitHub issues |
+| Qingping CO₂ Temp RH CGP22C | 1.2.1    | ✅ Yes | Using sample data from GitHub issues |
 ---
 
 ## 🔧 Troubleshooting

@@ -102,7 +102,25 @@ FDCD SD : 88 33 0C 54 84 34 2D 58 01 04 23 01 D2 01 02 01 64 13 02 41 03
 - **Temperature + Humidity**: `01 04 23 01 D2 01` → 29.1 °C / 46.6 %  
 - **Battery**: `02 01 64` → 100 %  
 - **CO₂**: `13 02 41 03` → 833 ppm  
-- **RSSI**: From scanner = –48 dBm  
+- **RSSI**: From scanner = –48 dBm
+  
+---
+
+## 🔎 Value Derivation (16-bit, little-endian)
+
+All sensor values are **16-bit (2 bytes)**, stored **Low Byte first, High Byte last**.  
+
+| Field       | Raw Bytes   | Decimal (LE) | Formula        | Final Value   |
+|-------------|-------------|--------------|----------------|---------------|
+| Temperature | `23 01`     | 0x0123 = 291 | 291 ÷ 10       | **29.1 °C**   |
+| Humidity    | `D2 01`     | 0x01D2 = 466 | 466 ÷ 10       | **46.6 %**    |
+| Battery     | `64`        | 0x64 = 100   | —              | **100 %**     |
+| CO₂         | `41 03`     | 0x0341 = 833 | —              | **833 ppm**   |
+| RSSI        | (scanner)   | –48          | —              | **–48 dBm**   |
+
+👉 **Rule**: All multi-byte values are **16-bit, little-endian** (low byte first, high byte last).  
+
+---
 
 ### ✅ Final Decoded Values
 - Temperature: **29.1 °C**  

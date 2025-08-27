@@ -70,7 +70,7 @@ However, based on testing:
    ```
 5. Replace the **BLE MAC address** with your own sensor’s:  
    ```cpp
-   static const char* TARGET_BLE_ADDR = "AA:BB:CC:xx:xx:xx";
+   static const char* TARGET_BLE_ADDR = "aa:bb:cc:xx:xx:xx";
    ```
    ⚠️ **Important**: Your device has a unique MAC. Find it using the **Qingping+ iOS app** (App Store → device info).  
 6. Compile and flash to ESP32-C3.  

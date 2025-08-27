@@ -2,8 +2,8 @@
 
 **BLE-to-MQTT bridge for Qingping CO₂ Temp RH sensors using ESP32-C3, with full Home Assistant integration.**
 
-📌 For **Qingping Temp & RH Barometer Pro (CGP23W)** setup, please refer to my other repository:  
-👉 [Qingping_Barometer_Pro_CGP23W_MQTT](https://github.com/markhsieh2020/Qingping_Barometer_Pro_CGP23W_MQTT)  
+- 📌 For **Qingping Temp & RH Barometer Pro (CGP23W)** setup, please refer to my other repository:  
+- 👉 [Qingping_Barometer_Pro_CGP23W_MQTT](https://github.com/markhsieh2020/Qingping_Barometer_Pro_CGP23W_MQTT)  
 ---
 
 ## 🚀 Project Overview

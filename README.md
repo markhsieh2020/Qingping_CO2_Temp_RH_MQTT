@@ -11,6 +11,13 @@ Sensor data is published over **MQTT with Autodiscovery**, enabling seamless int
 - The **Qingping CO₂ Temp RH (CGP22C)** broadcasts BLE data roughly **once per second**.  
 - In this example, the ESP32-C3 is configured to **publish to MQTT every 5 seconds**.  
 - ⚙️ This **5-second interval can be modified** in the source code to suit your requirements.
+  
+**PS:** According to the [official Qingping documentation](https://developer.qingping.co/), you can configure **private MQTT mode**.  
+However, based on testing:  
+- Once private MQTT is enabled, the **Qingping+ app** can no longer display data or modify settings.  
+- You will need to **reset the Qingping CO₂ Temp RH (CGP22C)** to restore app functionality.  
+- The official Qingping+ app supports **offline buffering**, temporarily storing data when offline and uploading it once the device reconnects.  
+- ⚡ If you want to **keep this offline history feature**, use this **BLE-to-MQTT bridge solution** instead of switching to private MQTT mode.  
 ---
 
 ## ✨ Features

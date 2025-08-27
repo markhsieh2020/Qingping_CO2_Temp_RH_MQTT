@@ -32,12 +32,12 @@ However, based on testing:
 - **MQTT Autodiscovery**: Auto-creates sensors and controls in Home Assistant.  
 - **Reliability**: Auto-reconnect to Wi-Fi & MQTT, WAN IP refresh, persistent boot counter in NVS.  
 
-## 📜 Full Code
-👉 This project includes the **complete, compilable source code**.  
-If you only need specific features (e.g., just sensors without Diagnostics or Controls), you can provide the entire code to an AI (such as ChatGPT) and simply describe which parts to remove or keep.  
-The AI will generate a trimmed version for you.  
+**PS:**
+- 👉 This project includes the **complete, compilable source code**.  
+- If you only need specific features (e.g., just sensors without Diagnostics or Controls), you can provide the entire code to an AI (such as ChatGPT) and simply describe which parts to remove or keep.  
+- The AI will generate a trimmed version for you.  
 
-This way, you always have the **full reference implementation**, while still being able to **customize a lightweight version** for your needs.
+- This way, you always have the **full reference implementation**, while still being able to **customize a lightweight version** for your needs.
 
 ---
 

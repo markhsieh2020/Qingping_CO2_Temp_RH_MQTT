@@ -70,7 +70,7 @@ However, based on testing:
    ```
 5. Replace the **BLE MAC address** with your own sensor’s:  
    ```cpp
-   static const char* TARGET_BLE_ADDR = "58:2d:34:84:54:0c";
+   static const char* TARGET_BLE_ADDR = "AA:BB:CC:xx:xx:xx";
    ```
    ⚠️ **Important**: Your device has a unique MAC. Find it using the **Qingping+ iOS app** (App Store → device info).  
 6. Compile and flash to ESP32-C3.  
@@ -93,7 +93,7 @@ However, based on testing:
 The Qingping CGP22C broadcasts sensor data via BLE (UUID `0xFDCD`). Example raw broadcast:  
 
 ```
-== ADV == name="Qingping CO2 Temp RH" addr=58:2d:34:84:54:0c rssi=-48
+== ADV == name="Qingping CO2 Temp RH" addr=AA:BB:CC:xx:xx:xx rssi=-48
 FDCD SD : 88 33 0C 54 84 34 2D 58 01 04 23 01 D2 01 02 01 64 13 02 41 03
 ```
 

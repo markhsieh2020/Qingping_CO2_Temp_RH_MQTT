@@ -1,0 +1,452 @@
+/*******************************************************
+ * ESP32-C3 mini + Qingping CO2 Temp RH (BLE) → HA MQTT
+ *
+ * - NimBLE scan (UUID=0xFDCD), parse Temp / RH / Battery / CO2 (ppm) / RSSI (BLE)
+ * - Publish state to MQTT every 5 seconds (Autodiscovery)
+ * - 【Diagnostic】Boot Count / LAN IP / MAC / MQTT Errors /
+ *                 Reset Reason / WAN IP / Wi-Fi BSSID / Wi-Fi Channel /
+ *                 Wi-Fi Reconnects / Wi-Fi RSSI Proxy / Wi-Fi SSID / Uptime
+ * - 【Controls】Restart Button (MQTT)
+ * - 【Controls】On-board LED (switch) → Blink 3 times on startup, default OFF
+ *
+ * Boards: ESP32-C3-MINI
+ * Arduino Core: 2.0+
+ * Libraries: NimBLE-Arduino 2.3.4, PubSubClient 2.8, ArduinoJson 7.4.2
+ *******************************************************/
+
+#include <Arduino.h>
+#include <WiFi.h>
+#define MQTT_MAX_PACKET_SIZE 2048
+#include <PubSubClient.h>
+#include <ArduinoJson.h>
+#include <NimBLEDevice.h>
+#include <vector>
+#include <Preferences.h>
+#include <HTTPClient.h>
+#include <esp_system.h>
+
+/* ===================【 Publish Interval 】=================== */
+#define PUBLISH_INTERVAL_MS 5000
+
+/* ===================【 Sensor Definition (HA Discovery) 】=================== */
+struct SensorConfig {
+  const char* id;
+  const char* name;
+  const char* icon;
+  const char* unit;
+  const char* devclass;
+  const char* stateclass;
+  const char* tpl_suffix;
+  const char* category; // nullptr or "diagnostic"
+};
+static const SensorConfig sensors[] = {
+  {"temperature","Temperature","mdi:thermometer","°C","temperature","measurement","",""},
+  {"humidity",   "Humidity","mdi:water-percent","%","humidity","measurement","",""},
+  {"battery",    "Battery","mdi:battery","%","battery","measurement","","diagnostic"},
+  {"co2",        "CO2","mdi:molecule-co2","ppm","carbon_dioxide","measurement","",""},
+  {"rssi",       "CO2 RSSI","mdi:signal","dBm","signal_strength","measurement","","diagnostic"},
+  {"boot_count",     "Boot Count","mdi:counter","",   "", "total_increasing","", "diagnostic"},
+  {"ip",             "LAN IP","mdi:ip","",            "", "",                 "", "diagnostic"},
+  {"mac",            "MAC Address","mdi:network","",  "", "",                 "", "diagnostic"},
+  {"mqtt_errors",    "MQTT Errors","mdi:home-alert","", "", "total_increasing","", "diagnostic"},
+  {"reset_reason",   "Reset Reason","mdi:restart-alert","", "", "",           "", "diagnostic"},
+  {"wan_ip",         "WAN IP","mdi:web","",           "", "",                 "", "diagnostic"},
+  {"wifi_bssid",     "Wi-Fi BSSID","mdi:access-point","", "", "",             "", "diagnostic"},
+  {"wifi_channel",   "Wi-Fi Channel","mdi:wifi-settings","", "", "",          "", "diagnostic"},
+  {"wifi_reconnects","Wi-Fi Reconnects","mdi:wifi-off","", "", "total_increasing","", "diagnostic"},
+  {"rssi_proxy",     "Wi-Fi RSSI Proxy","mdi:wifi-strength-2","dBm","signal_strength","measurement","", "diagnostic"},
+  {"wifi_ssid",      "Wi-Fi SSID","mdi:wifi","",      "", "",                 "", "diagnostic"},
+  {"uptime",         "Uptime","mdi:clock-outline","s","duration","measurement","", "diagnostic"}
+};
+
+/* ===================【 WiFi / MQTT Settings 】=================== */
+static const char* ssid        = "YOUR_WIFI_SSID";       // ← Replace with your WiFi SSID
+static const char* password    = "YOUR_WIFI_PASSWORD";   // ← Replace with your WiFi password
+static const char* mqtt_server = "YOUR_MQTT_SERVER";     // ← Replace with your MQTT broker hostname or IP
+static const int   mqtt_port   = 1883;                   // ← Replace with your MQTT broker port (default: 1883)
+static const char* mqtt_user   = "mqtt_user";            // ← Replace with your MQTT username
+static const char* mqtt_pass   = "mqtt_pass";            // ← Replace with your MQTT password
+
+static const char* discovery_prefix = "homeassistant";   // ← Usually keep "homeassistant" for HA MQTT discovery
+static const char* topic_prefix     = "ESP32_C3_BLE_11EC7C"; // ← Change to a unique topic prefix per device
+static const char* AVAIL_TOPIC      = "ESP32_C3_BLE_11EC7C/availability"; // ← Must match your topic_prefix
+
+// Controls: Restart / LED
+static const char* CMD_RESTART_TOPIC = "ESP32_C3_BLE_11EC7C/cmd/restart"; // ← Command topic for restart control
+static const char* CMD_LED_TOPIC     = "ESP32_C3_BLE_11EC7C/cmd/led";     // ← Command topic for LED control
+static const char* STATE_LED_TOPIC   = "ESP32_C3_BLE_11EC7C/state/led";   // ← State topic for LED reporting
+
+static const char* DEVICE_ID   = "ESP32_C3_BLE_11EC7C";  // ← Unique device ID (use part of MAC address to avoid conflicts)
+static const char* DEVICE_NAME = "ESP32-C3 CO2 11EC7C";  // ← Friendly name (shown in Home Assistant)
+static const char* DEVICE_MODEL= "ESP32-C3-MINI";        // ← Hardware model
+static const char* DEVICE_MANUFACTURER = "Mark";         // ← Replace with your name/brand if sharing
+static const char* HW_VERSION  = "ESP32_C3_mini_BLE_MQTT (2025-08-26)"; // ← Optional: update with your HW version/date
+static const char* SW_VERSION  = "ESP32_C3_mini_BLE (2025-08-26)";      // ← Optional: update with your SW version/date, Firmware in Home Assistant
+
+WiFiClient   net;
+PubSubClient client(net);
+Preferences  prefs;
+
+/* ===================【 LED Settings 】=================== */
+static const int LED_PIN = 8;     // Most C3 boards: LOW = ON, HIGH = OFF
+static bool ledState = false;
+
+/* ===================【 Target BLE Device 】=================== */
+static const char* TARGET_BLE_ADDR = "58:2d:34:84:54:0c"; // Lowercase, colon format
+
+
+struct QingpingCO2Parsed {
+  float temperature_c;
+  float humidity_rh;
+  int   battery_pct;
+  int   co2_ppm;
+  int   rssi_dbm;
+};
+static QingpingCO2Parsed g_last{};
+static bool g_haveData = false;
+
+/* ===================【 Diagnostic Status 】=================== */
+static uint32_t bootCount=0, wifiReconnects=0, mqttErrors=0;
+static char wan_ip[40] = "N/A";
+static uint32_t lastWanFetch = 0;
+static const uint32_t WAN_REFRESH_INTERVAL_MS = 600000;
+static const uint32_t WAN_FAIL_BACKOFF_MS    = 5000;
+static volatile bool g_needRestart = false;
+
+/* ===================【 Utilities 】=================== */
+static String resetReasonStr() {
+  switch (esp_reset_reason()) {
+    case ESP_RST_POWERON:  return "Power-On";
+    case ESP_RST_EXT:      return "External";
+    case ESP_RST_SW:       return "Software";
+    case ESP_RST_PANIC:    return "Exception";
+    case ESP_RST_INT_WDT:  return "RTC-WDT";
+    case ESP_RST_TASK_WDT: return "Task-WDT";
+    case ESP_RST_BROWNOUT: return "Brown-Out";
+    default:               return "Unknown";
+  }
+}
+static bool fetchWANIPOnce(const char* url) {
+  HTTPClient http; http.setTimeout(3000);
+  if (!http.begin(url)) return false;
+  int code = http.GET();
+  if (code == 200) {
+    String s = http.getString(); s.trim();
+    if (s.length() > 0 && s.length() < sizeof(wan_ip)) {
+      s.toCharArray(wan_ip, sizeof(wan_ip));
+      http.end();
+      return true;
+    }
+  }
+  http.end();
+  return false;
+}
+static void updateWanIPIfNeeded() {
+  if (WiFi.status()!=WL_CONNECTED) return;
+  uint32_t now = millis();
+  bool haveWan = (strcmp(wan_ip,"N/A")!=0) && wan_ip[0] != '\0';
+  if ((haveWan && now - lastWanFetch < WAN_REFRESH_INTERVAL_MS) ||
+      (!haveWan && now - lastWanFetch < WAN_FAIL_BACKOFF_MS)) return;
+  if (fetchWANIPOnce("http://api.ipify.org") ||
+      fetchWANIPOnce("http://ifconfig.me/ip") ||
+      fetchWANIPOnce("http://ipv4.icanhazip.com")) {
+    lastWanFetch = now;
+  } else {
+    lastWanFetch = now;
+  }
+}
+static void WiFiEvent(WiFiEvent_t event) {
+  switch(event) {
+    case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
+      wifiReconnects++; strncpy(wan_ip, "N/A", sizeof(wan_ip)); break;
+    case ARDUINO_EVENT_WIFI_STA_GOT_IP:
+      strncpy(wan_ip, "N/A", sizeof(wan_ip)); break;
+    default: break;
+  }
+}
+
+/* ===================【 BLE Parsing 】=================== */
+static bool extractFDCD(const std::vector<uint8_t>& adv, std::vector<uint8_t>& out) {
+  size_t i = 0;
+  while (i + 1 < adv.size()) {
+    uint8_t len = adv[i];
+    if (len == 0) break;
+    if (i + 1 + len > adv.size()) break;
+    uint8_t type = adv[i+1];
+    if (type == 0x16 && len >= 3) {
+      if (adv[i+2]==0xCD && adv[i+3]==0xFD) {
+        out.assign(adv.begin()+i+4, adv.begin()+i+1+len);
+        return true;
+      }
+    }
+    i += 1 + len;
+  }
+  return false;
+}
+static bool parseFDCD_TLV(const std::vector<uint8_t>& sd, QingpingCO2Parsed& o) {
+  if (sd.size() < 14) return false;
+  size_t pos = 8; // Skip device ID
+  auto rd16s=[&](size_t off)->int16_t {return (int16_t)(sd[off] | (sd[off+1] << 8));};
+  auto rd16u=[&](size_t off)->uint16_t{return (uint16_t)(sd[off] | (sd[off+1] << 8));};
+  pos += 2; // key,dtype
+  int16_t  t_raw = rd16s(pos); pos += 2;
+  uint16_t h_raw = rd16u(pos); pos += 2;
+  o.temperature_c = t_raw / 10.0f;
+  o.humidity_rh   = h_raw / 10.0f;
+  o.battery_pct   = -1;
+  o.co2_ppm       = -1;
+  while (pos + 1 < sd.size()) {
+    uint8_t tag = sd[pos++], len = sd[pos++];
+    if (pos + len > sd.size()) break;
+    if (tag == 0x02 && len == 1)      o.battery_pct = sd[pos];
+    else if (tag == 0x13 && len == 2) o.co2_ppm     = rd16u(pos);
+    pos += len;
+  }
+  return (o.co2_ppm >= 0);
+}
+
+/* ============【 NimBLE 2.3.x: Use NimBLEScanCallbacks 】============ */
+static bool addrEqualLower(const NimBLEAddress& a, const char* bLowerColon) {
+  std::string s = a.toString();
+  size_t n = s.size();
+  if (n != strlen(bLowerColon)) return false;
+  for (size_t i=0;i<n;++i) {
+    char c = s[i];
+    if (c>='A' && c<='Z') c = char(c - 'A' + 'a');
+    if (c != bLowerColon[i]) return false;
+  }
+  return true;
+}
+
+class MyScanCB : public NimBLEScanCallbacks {
+ public:
+  void onResult(const NimBLEAdvertisedDevice* adv) override {
+    if (!adv) return;
+    if (!addrEqualLower(adv->getAddress(), TARGET_BLE_ADDR)) return;
+
+    auto payload = adv->getPayload();             // std::vector<uint8_t>
+    std::vector<uint8_t> fdcd;
+    if (!extractFDCD(payload, fdcd)) return;
+
+    QingpingCO2Parsed v{};
+    if (!parseFDCD_TLV(fdcd, v)) return;
+
+    v.rssi_dbm = adv->getRSSI();
+    g_last = v; g_haveData = true;
+  }
+  // Optional: scan callback (prevents override signature mismatch)
+  void onScanEnd(const NimBLEScanResults& /*results*/, int /*reason*/) override {}
+};
+
+/* ===================【 LED Control 】=================== */
+static void setLed(bool on) {
+  ledState = on;
+  digitalWrite(LED_PIN, on ? LOW : HIGH);                // Inverted output
+  if (client.connected()) client.publish(STATE_LED_TOPIC, on ? "ON" : "OFF", true);
+}
+
+/* ===================【 HA Discovery 】=================== */
+static void publishDiscoverySensor(const SensorConfig& s) {
+  char topic[200], payload[1024], tpl[96];
+  snprintf(topic,sizeof(topic), "%s/sensor/%s_%s/config", discovery_prefix, topic_prefix, s.id);
+  snprintf(tpl,sizeof(tpl),   "{{ value_json.%s%s }}", s.id, s.tpl_suffix);
+  int off = snprintf(payload, sizeof(payload),
+    "{"
+      "\"name\":\"%s\",\"has_entity_name\":true,"
+      "\"unique_id\":\"%s_%s\","
+      "\"state_topic\":\"%s/state\",\"value_template\":\"%s\","
+      "\"availability_topic\":\"%s\",\"icon\":\"%s\"",
+      s.name, DEVICE_ID, s.id, topic_prefix, tpl, AVAIL_TOPIC, s.icon
+  );
+  if (*s.unit)       off += snprintf(payload+off, sizeof(payload)-off, ",\"unit_of_measurement\":\"%s\"", s.unit);
+  if (*s.devclass)   off += snprintf(payload+off, sizeof(payload)-off, ",\"device_class\":\"%s\"", s.devclass);
+  if (*s.stateclass) off += snprintf(payload+off, sizeof(payload)-off, ",\"state_class\":\"%s\"", s.stateclass);
+  if (s.category && *s.category)
+    off += snprintf(payload+off, sizeof(payload)-off, ",\"entity_category\":\"%s\"", s.category);
+  snprintf(payload+off, sizeof(payload)-off,
+    ",\"device\":{"
+      "\"identifiers\":[\"%s\"],"
+      "\"name\":\"%s\",\"model\":\"%s\","
+      "\"manufacturer\":\"%s\",\"sw_version\":\"%s\",\"hw_version\":\"%s\""
+    "}"
+    "}",
+    DEVICE_ID, DEVICE_NAME, DEVICE_MODEL,
+    DEVICE_MANUFACTURER, SW_VERSION, HW_VERSION
+  );
+  client.publish(topic, payload, true);
+  delay(20);
+}
+static void publishDiscoveryRestartButton() {
+  char topic[200], payload[1024];
+  snprintf(topic,sizeof(topic), "%s/button/%s_restart/config", discovery_prefix, topic_prefix);
+  snprintf(payload,sizeof(payload),
+    "{"
+      "\"name\":\"Restart\","
+      "\"unique_id\":\"%s_restart\","
+      "\"command_topic\":\"%s\","
+      "\"availability_topic\":\"%s\","
+      "\"icon\":\"mdi:restart\","
+      "\"device\":{"
+        "\"identifiers\":[\"%s\"],"
+        "\"name\":\"%s\",\"model\":\"%s\","
+        "\"manufacturer\":\"%s\",\"sw_version\":\"%s\",\"hw_version\":\"%s\""
+      "}"
+    "}",
+    DEVICE_ID, CMD_RESTART_TOPIC, AVAIL_TOPIC,
+    DEVICE_ID, DEVICE_NAME, DEVICE_MODEL,
+    DEVICE_MANUFACTURER, SW_VERSION, HW_VERSION
+  );
+  client.publish(topic, payload, true);
+  delay(20);
+}
+static void publishDiscoveryLedSwitch() {
+  char topic[200], payload[512];
+  snprintf(topic, sizeof(topic), "%s/switch/%s_led/config", discovery_prefix, topic_prefix);
+  snprintf(payload, sizeof(payload),
+    "{"
+      "\"name\":\"on-board LED\","
+      "\"unique_id\":\"%s_led\","
+      "\"command_topic\":\"%s\","
+      "\"state_topic\":\"%s\","
+      "\"availability_topic\":\"%s\","
+      "\"icon\":\"mdi:led-on\","
+      "\"optimistic\":false,"
+      "\"device\":{"
+        "\"identifiers\":[\"%s\"],"
+        "\"name\":\"%s\",\"model\":\"%s\","
+        "\"manufacturer\":\"%s\",\"sw_version\":\"%s\",\"hw_version\":\"%s\""
+      "}"
+    "}",
+    DEVICE_ID, CMD_LED_TOPIC, STATE_LED_TOPIC, AVAIL_TOPIC,
+    DEVICE_ID, DEVICE_NAME, DEVICE_MODEL,
+    DEVICE_MANUFACTURER, SW_VERSION, HW_VERSION
+  );
+  client.publish(topic, payload, true);
+  delay(20);
+}
+static void publishAllDiscovery() {
+  for (const auto& s : sensors) publishDiscoverySensor(s);
+  publishDiscoveryRestartButton();
+  publishDiscoveryLedSwitch();
+}
+
+/* ===================【 Status Reporting 】=================== */
+static void publishState() {
+  if (!g_haveData) return;
+  StaticJsonDocument<1536> doc;
+  doc["temperature"] = g_last.temperature_c;
+  doc["humidity"]    = g_last.humidity_rh;
+  doc["battery"]     = g_last.battery_pct;
+  doc["co2"]         = g_last.co2_ppm;
+  doc["rssi"]        = g_last.rssi_dbm;
+  doc["boot_count"]      = bootCount;
+  doc["ip"]              = (WiFi.status()==WL_CONNECTED)? WiFi.localIP().toString() : "0.0.0.0";
+  doc["mac"]             = WiFi.macAddress();
+  doc["mqtt_errors"]     = mqttErrors;
+  doc["reset_reason"]    = resetReasonStr();
+  doc["wan_ip"]          = wan_ip;
+  doc["wifi_bssid"]      = (WiFi.status()==WL_CONNECTED)? WiFi.BSSIDstr() : String("N/A");
+  doc["wifi_channel"]    = (WiFi.status()==WL_CONNECTED)? WiFi.channel() : 0;
+  doc["wifi_reconnects"] = wifiReconnects;
+  doc["rssi_proxy"]      = (WiFi.status()==WL_CONNECTED)? WiFi.RSSI() : 0;
+  doc["wifi_ssid"]       = (WiFi.status()==WL_CONNECTED)? WiFi.SSID() : "Offline";
+  doc["uptime"]          = millis()/1000;
+  char buf[1400];
+  serializeJson(doc, buf, sizeof(buf));
+  client.publish((String(topic_prefix)+"/state").c_str(), buf, true);
+  Serial.println("[MQTT] Published state");
+}
+
+/* ===================【 MQTT Callback / Connection 】=================== */
+static void mqttCallback(char* t, byte* payload, unsigned int len) {
+  if (strcmp(t, CMD_RESTART_TOPIC) == 0) { g_needRestart = true; return; }
+  if (strcmp(t, CMD_LED_TOPIC) == 0) {
+    String msg((char*)payload, len); msg.trim(); msg.toUpperCase();
+    if (msg == "ON") setLed(true);
+    else if (msg == "OFF") setLed(false);
+  }
+}
+static void reconnect() {
+  while (!client.connected()) {
+    Serial.print("[MQTT] Connecting...");
+    if (client.connect(DEVICE_ID, mqtt_user, mqtt_pass, AVAIL_TOPIC, 0, false, "offline")) {
+      Serial.println("OK");
+      client.publish(AVAIL_TOPIC, "online", true);
+      publishAllDiscovery();
+      client.publish(CMD_LED_TOPIC, "", true);  // Clear old retained command
+      delay(10);
+      setLed(false);                            // Default OFF (synchronize with HA state)
+      client.subscribe(CMD_RESTART_TOPIC);
+      client.subscribe(CMD_LED_TOPIC);
+      publishState();
+    } else {
+      mqttErrors++;
+      Serial.printf(" fail rc=%d\n", client.state());
+      delay(2000);
+    }
+  }
+}
+
+/* ===================【 Setup / Loop 】=================== */
+static unsigned long lastPublish = 0;
+
+void setup() {
+  Serial.begin(115200);
+
+  // Persist Boot Count (stored in NVS)
+  prefs.begin("sys", false);
+  bootCount = prefs.getUInt("boot", 0) + 1;
+  prefs.putUInt("boot", bootCount);
+  prefs.end();
+
+  // LED pin + blink 3 times at boot (ends OFF, does not publish to MQTT)
+  pinMode(LED_PIN, OUTPUT);
+  for (int i=0;i<3;++i){ digitalWrite(LED_PIN, LOW); delay(200); digitalWrite(LED_PIN, HIGH); delay(200); }
+  digitalWrite(LED_PIN, HIGH); ledState = false;
+
+  // Wi-Fi
+  WiFi.onEvent(WiFiEvent);
+  WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
+  WiFi.begin(ssid, password);
+  while (WiFi.status()!=WL_CONNECTED){ delay(500); Serial.print("."); }
+  Serial.println("\n[WiFi] Connected");
+
+  // MQTT
+  client.setServer(mqtt_server, mqtt_port);
+  client.setBufferSize(MQTT_MAX_PACKET_SIZE);
+  client.setCallback(mqttCallback);
+
+  // NimBLE
+  NimBLEDevice::init("");
+  NimBLEDevice::setPower(ESP_PWR_LVL_P3);
+  NimBLEScan* scan = NimBLEDevice::getScan();
+  static MyScanCB cb;
+  scan->setScanCallbacks(&cb, true);   // ★ Use instead of setAdvertisedDeviceCallbacks
+  scan->setActiveScan(false);
+  scan->setDuplicateFilter(false);
+  scan->setInterval(80);
+  scan->setWindow(48);
+  scan->start(0, false, true);         // ★ Second parameter must be a bool (cannot be nullptr)
+
+  Serial.println("[INIT] Ready");
+}
+
+void loop() {
+  updateWanIPIfNeeded();
+  if (!client.connected()) reconnect();
+  client.loop();
+
+  if (g_needRestart) {
+    g_needRestart = false;
+    client.publish(AVAIL_TOPIC, "rebooting", true);
+    client.loop(); delay(150);
+    ESP.restart();
+  }
+
+  unsigned long now = millis();
+  if (now - lastPublish >= PUBLISH_INTERVAL_MS) {
+    lastPublish = now;
+    publishState();
+  }
+}

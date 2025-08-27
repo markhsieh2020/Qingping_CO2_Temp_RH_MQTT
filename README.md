@@ -43,11 +43,9 @@ Sensor data is published over **MQTT with Autodiscovery**, enabling seamless int
 ---
 
 ## ⚡ Installation
-1. Clone this repository:  
-   ```bash
-   git clone https://github.com/markhsieh2020/Qingping_CO2_Temp_RH_MQTT.git
-   ```
-2. Open in Arduino IDE.  
+1. Open this file in your browser:  
+   👉 [esp32c3_qingping_co2_mqtt.txt](https://github.com/markhsieh2020/Qingping_CO2_Temp_RH_MQTT/blob/main/esp32c3_qingping_co2_mqtt.txt)  
+2. Copy all the code inside the `.txt` file.  
 3. Install required libraries (see above).  
 4. Edit Wi-Fi and MQTT credentials in the source code:  
    ```cpp

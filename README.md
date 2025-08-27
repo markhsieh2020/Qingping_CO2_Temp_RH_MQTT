@@ -8,6 +8,9 @@
 This project connects a **Qingping CO₂ Temp RH (CGP22C)** sensor (via BLE) to **Home Assistant** using an **ESP32-C3 PRO MINI (ESP32-C3FH4)** as a bridge.  
 Sensor data is published over **MQTT with Autodiscovery**, enabling seamless integration with Home Assistant.  
 
+- The **Qingping CO₂ Temp RH (CGP22C)** broadcasts BLE data roughly **once per second**.  
+- In this example, the ESP32-C3 is configured to **publish to MQTT every 5 seconds**.  
+- ⚙️ This **5-second interval can be modified** in the source code to suit your requirements.
 ---
 
 ## ✨ Features
